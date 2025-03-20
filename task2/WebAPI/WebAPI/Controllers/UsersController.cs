@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using WebAPI.Model.Dat;
 using WebAPI.Model.Entities;
 using WebAPI.Model.DTOs;
+using WebAPI.Controllers.Services;
 namespace WebAPI.Controllers;
 
 [ApiController]
@@ -13,10 +14,16 @@ namespace WebAPI.Controllers;
 public class UsersController : ControllerBase
 {
   private readonly WebAppDbContext _context;
+  private JwtOptions _jwtOptions;
+  private readonly ILogger<UsersController> _logger;
 
-  public UsersController(WebAppDbContext context) {
+  public UsersController(WebAppDbContext context, JwtOptions jwtOptions, ILogger<UsersController> logger)
+  {
     _context = context;
+    _jwtOptions = jwtOptions;
+    _logger = logger;
   }
+
 
   [HttpPost]
   [Route("SignUp")]
@@ -41,7 +48,7 @@ public class UsersController : ControllerBase
       await _context.SaveChangesAsync();
       return Ok(user.Id);
     }
-    catch (Exception ex)
+    catch (Exception)
     {
       return StatusCode(500, "Error Adding user");
     }
@@ -49,7 +56,7 @@ public class UsersController : ControllerBase
 
   [HttpPost]
   [Route("Login")]
-  public async Task<ActionResult<int>> LogIn([FromBody] UserLoginRequest loginRequest)
+  public async Task<ActionResult<UserLoginRespond>> LogIn([FromBody] UserLoginRequest loginRequest)
   {
     if (string.IsNullOrWhiteSpace(loginRequest.Username) || string.IsNullOrWhiteSpace(loginRequest.Password))
       return BadRequest("Username and password are required");
@@ -59,7 +66,9 @@ public class UsersController : ControllerBase
     if (existingUser == null || !BCrypt.Net.BCrypt.Verify(loginRequest.Password, existingUser.Password))
       return Unauthorized("Invalid Username Or Password");
 
-    return Ok(existingUser.Id);
+    // generate user token
+    string token = new JwtTokenGeneratorService(_jwtOptions).GenerateToken(loginRequest.Username);
+    return Ok(new UserLoginRespond { Id = existingUser.Id , Token = token});
   }
 
 

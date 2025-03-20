@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using WebAPI.Model.Dat;
@@ -21,6 +22,7 @@ public class ProductsController : ControllerBase
 
     [HttpPost]
     [Route("")]
+    [Authorize]
     public async Task<ActionResult<int>> AddProduct(AddOrUpdateProductRequest addProductReq)
     {
       var (isValid, ErrorMessage) = addProductReq.IsValidRequest();
@@ -49,6 +51,7 @@ public class ProductsController : ControllerBase
 
     [HttpGet]
     [Route("")]
+    [Authorize]
     public async Task<ActionResult<IEnumerable<Product>>> GetAllProducts(){
       var records = await _context.Products.ToListAsync();
 
@@ -60,6 +63,7 @@ public class ProductsController : ControllerBase
 
     [HttpGet]
     [Route("{id}")]
+    [Authorize]
     public async Task<ActionResult<Product>> GetProductById(int id)
     {
       if (id <= 0)
@@ -74,7 +78,7 @@ public class ProductsController : ControllerBase
 
         return Ok(product);
       }
-      catch (Exception ex)
+      catch (Exception)
       {
         return StatusCode(500, "Failed To Retrieve Product");
       }
@@ -82,6 +86,7 @@ public class ProductsController : ControllerBase
 
   [HttpPut]
   [Route("{id}")]
+  [Authorize]
   public async Task<ActionResult<int>> UpdateProduct(int id, AddOrUpdateProductRequest updateProductReq)
   {
     if (id <= 0)
@@ -145,6 +150,7 @@ public class ProductsController : ControllerBase
 
   [HttpDelete]
   [Route("{id}")]
+  [Authorize]
   public async Task<ActionResult<int>> DeleteProduct(int id)
   {
     if (id <= 0)
