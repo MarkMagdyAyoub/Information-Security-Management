@@ -134,7 +134,7 @@ public class UsersController : ControllerBase
     string qrCode = Otp.QrCodeAsBase64(user.TwoFactorSecret, user.Username, _jwtOptions.Issuer);
 
     await _context.SaveChangesAsync();
-    return Ok(new { QrCode =  qrCode , SecretKey = user.TwoFactorSecret });
+    return Ok(new { QrCode =  qrCode });
   }
 
 }
