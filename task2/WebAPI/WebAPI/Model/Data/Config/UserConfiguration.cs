@@ -36,5 +36,11 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
       .HasColumnType("VARCHAR")
       .HasMaxLength(64)
       .IsRequired();
+
+    builder
+      .Property(x => x.TwoFactorSecret)
+      .HasColumnType("VARCHAR")
+      .HasMaxLength(32)
+      .IsRequired();
   }
 }

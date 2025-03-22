@@ -27,49 +27,59 @@ public class UsersController : ControllerBase
 
   [HttpPost]
   [Route("SignUp")]
-  public async Task<ActionResult<int>> SignUp(User user) {
-    // check data completeness
-    if (!user.IsDataCompleted())
+  public async Task<ActionResult<int>> SignUp([FromBody] UserSignUpRequest userRequest)
+  {
+    // Check data completeness
+    if (!userRequest.IsDataCompleted())
       return BadRequest("User Data Not Completed");
 
     // Check if the username already exists
-    var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Username == user.Username);
-    
+    var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Username == userRequest.Username);
     if (existingUser != null)
       return Conflict("Username Already Taken");
 
-    // hash password using bcrypt hash algorithm
-    user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
-   
+    // Map DTO to User entity
+    var newUser = new User
+    {
+      Name = userRequest.Name,
+      Username = userRequest.Username,
+      Password = BCrypt.Net.BCrypt.HashPassword(userRequest.Password),
+      TwoFactorSecret = Otp.SecretKey()
+    };
+
     try
     {
-      // add user into the database
-      await _context.Users.AddAsync(user);
+      // Add user into the database
+      await _context.Users.AddAsync(newUser);
       await _context.SaveChangesAsync();
-      return Ok(user.Id);
+      return Ok(newUser.Id);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
-      return StatusCode(500, "Error Adding user");
+      return StatusCode(500, $"Error Adding user: {ex.Message}");
     }
   }
 
+
   [HttpPost]
-  [Route("Login")]
+  [Route("LogIn")]
   public async Task<ActionResult<UserLoginRespond>> LogIn([FromBody] UserLoginRequest loginRequest)
   {
-    if (string.IsNullOrWhiteSpace(loginRequest.Username) || string.IsNullOrWhiteSpace(loginRequest.Password))
-      return BadRequest("Username and password are required");
-
     var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Username == loginRequest.Username);
 
     if (existingUser == null || !BCrypt.Net.BCrypt.Verify(loginRequest.Password, existingUser.Password))
       return Unauthorized("Invalid Username Or Password");
 
-    // generate user token
+    if (string.IsNullOrEmpty(existingUser.TwoFactorSecret))
+      return BadRequest("2FA not enabled for this user");
+
+    if (string.IsNullOrWhiteSpace(loginRequest.OtpCode) || Otp.Verified(existingUser.TwoFactorSecret, loginRequest.OtpCode))
+      return Unauthorized("Invalid OTP code.");
+
     string token = new JwtTokenGeneratorService(_jwtOptions).GenerateToken(loginRequest.Username);
-    return Ok(new UserLoginRespond { Id = existingUser.Id , Token = token});
+    return Ok(new UserLoginRespond { Id = existingUser.Id, Token = token });
   }
+
 
 
   [HttpPut]
@@ -108,4 +118,23 @@ public class UsersController : ControllerBase
       return StatusCode(500,"Failed to update user");
     }
   }
+
+  [HttpGet]
+  [Route("SetupOtp/{userId}")]
+  public async Task<IActionResult> SetupOtp(int userId)
+  {
+    var user = await _context.Users.FindAsync(userId);
+    if (user == null) 
+      return NotFound("User not found");
+
+    // Generate a new secret key
+    user.TwoFactorSecret = Otp.SecretKey();
+
+    // Generate QR Code as Base64 string
+    string qrCode = Otp.QrCodeAsBase64(user.TwoFactorSecret, user.Username, _jwtOptions.Issuer);
+
+    await _context.SaveChangesAsync();
+    return Ok(new { QrCode =  qrCode , SecretKey = user.TwoFactorSecret });
+  }
+
 }
