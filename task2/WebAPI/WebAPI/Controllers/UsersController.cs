@@ -63,28 +63,60 @@ public class UsersController : ControllerBase
 
   [HttpPost]
   [Route("LogIn")]
-  public async Task<ActionResult<UserLoginRespond>> LogIn([FromBody] UserLoginRequest loginRequest)
+  public async Task<ActionResult> LogIn([FromBody] UserLoginRequest loginRequest)
   {
+    if (loginRequest == null || string.IsNullOrWhiteSpace(loginRequest.Username) ||
+        string.IsNullOrWhiteSpace(loginRequest.Password))
+    {
+      return BadRequest("Invalid login request");
+    }
+
     var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Username == loginRequest.Username);
 
     if (existingUser == null || !BCrypt.Net.BCrypt.Verify(loginRequest.Password, existingUser.Password))
-      return Unauthorized("Invalid Username Or Password");
+      return Unauthorized("Invalid username or password");
 
-    if (string.IsNullOrEmpty(existingUser.TwoFactorSecret))
-      return BadRequest("2FA not enabled for this user");
+    var qrCode = Otp.QrCodeAsBase64(existingUser.TwoFactorSecret!, existingUser.Username!, _jwtOptions.Issuer!);
 
-    if (string.IsNullOrWhiteSpace(loginRequest.OtpCode) || Otp.Verified(existingUser.TwoFactorSecret, loginRequest.OtpCode))
-      return Unauthorized("Invalid OTP code.");
+    return Ok(new { QrCode = qrCode });
+  }
 
-    string token = new JwtTokenGeneratorService(_jwtOptions).GenerateToken(loginRequest.Username);
-    return Ok(new UserLoginRespond { Id = existingUser.Id, Token = token });
+  [HttpPost]
+  [Route("VerifyTwoFactor")]
+  public ActionResult<UserLoginRespond> VerifyTwoFactor([FromBody] TFRequest twoFactorRequest)
+  {
+    if (twoFactorRequest == null || string.IsNullOrWhiteSpace(twoFactorRequest.OtpCode) ||
+        !twoFactorRequest.UserId.HasValue)
+    {
+      return BadRequest("Invalid 2FA request");
+    }
+
+    var existingUser = _context.Users
+        .FirstOrDefault(u => u.Id == twoFactorRequest.UserId);
+
+    if (existingUser == null)
+    {
+      return Unauthorized("Invalid user");
+    }
+
+    if (string.IsNullOrEmpty(existingUser.TwoFactorSecret) || Otp.Verified(existingUser.TwoFactorSecret, twoFactorRequest.OtpCode))
+    {
+      return Unauthorized("Invalid OTP code");
+    }
+
+    string token = new JwtTokenGeneratorService(_jwtOptions).GenerateToken(existingUser.Username!);
+    return Ok(new UserLoginRespond
+    {
+      Token = token
+    });
   }
 
 
 
   [HttpPut]
   [Route("UpdateUser/{id}")]
-  public async Task<ActionResult<int>> UpdateUser(int id, UserUpdateRequest user){
+  public async Task<ActionResult<int>> UpdateUser(int id, UserUpdateRequest user)
+  {
     if (user == null || string.IsNullOrEmpty(user.Name) || string.IsNullOrEmpty(user.Password))
       return BadRequest("User data not completed");
 
@@ -95,46 +127,32 @@ public class UsersController : ControllerBase
 
     // Update fields (if provided)
     bool dataChanged = false;
-    if (!string.IsNullOrWhiteSpace(user.Name)){
+    if (!string.IsNullOrWhiteSpace(user.Name))
+    {
       existingUser.Name = user.Name;
       dataChanged = true;
     }
-    if (!string.IsNullOrWhiteSpace(user.Password)){
+    if (!string.IsNullOrWhiteSpace(user.Password))
+    {
       dataChanged = true;
       existingUser.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
     }
-    
-    try{
-      if(dataChanged)
+
+    try
+    {
+      if (dataChanged)
         await _context.SaveChangesAsync();
       return Ok(existingUser.Id);
     }
-    catch (DbUpdateConcurrencyException){
+    catch (DbUpdateConcurrencyException)
+    {
       if (!await _context.Users.AnyAsync(x => x.Id == id))
         return NotFound("User no longer exists");
       return Conflict("User was updated by another process");
     }
-    catch (Exception){
-      return StatusCode(500,"Failed to update user");
+    catch (Exception)
+    {
+      return StatusCode(500, "Failed to update user");
     }
   }
-
-  [HttpGet]
-  [Route("SetupOtp/{userId}")]
-  public async Task<IActionResult> SetupOtp(int userId)
-  {
-    var user = await _context.Users.FindAsync(userId);
-    if (user == null) 
-      return NotFound("User not found");
-
-    // Generate a new secret key
-    user.TwoFactorSecret = Otp.SecretKey();
-
-    // Generate QR Code as Base64 string
-    string qrCode = Otp.QrCodeAsBase64(user.TwoFactorSecret, user.Username, _jwtOptions.Issuer);
-
-    await _context.SaveChangesAsync();
-    return Ok(new { QrCode =  qrCode });
-  }
-
 }
